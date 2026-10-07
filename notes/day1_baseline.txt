@@ -1,0 +1,11 @@
+
+wrk -t4 -c100 -d10s http://localhost:8080/api/v1/service-a/test
+
+Running 10s test @ http://localhost:8080/api/v1/service-a/test
+  4 threads and 100 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     9.48ms    7.08ms 101.57ms   76.13%
+    Req/Sec     2.86k   567.31     3.67k    78.75%
+  113886 requests in 10.03s, 18.57MB read
+Requests/sec:  11356.35
+Transfer/sec:      1.85MB
