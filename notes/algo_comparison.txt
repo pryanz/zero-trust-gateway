@@ -1,0 +1,28 @@
+We will compare the Algorithms between Sliding window and Token Bucket for Rate limiting
+
+~~~~~ Sliding Window ~~~~~
+
+Running 30s test @ http://localhost:8080
+  8 threads and 100 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     5.59ms    3.63ms  70.52ms   89.85%
+    Req/Sec     2.29k   649.62     3.34k    78.96%
+  548188 requests in 30.04s, 117.11MB read
+  Non-2xx or 3xx responses: 548168
+
+Requests/sec:  18248.09
+Transfer/sec:      3.90MB
+
+
+~~~~~~ Token Bucket ~~~~~~
+
+Running 30s test @ http://localhost:8080
+  8 threads and 100 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     5.29ms    3.73ms  82.96ms   91.39%
+    Req/Sec     2.46k   696.49     5.59k    81.25%
+  587780 requests in 30.05s, 125.56MB read
+  Non-2xx or 3xx responses: 587760
+  
+Requests/sec:  19562.35
+Transfer/sec:      4.18MB

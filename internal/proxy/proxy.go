@@ -1,18 +1,23 @@
 package proxy
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
 	"time"
-	"crypto/rand"
+
 	"github.com/pryanz/zero-trust-gateway/internal/auth"
+	"github.com/pryanz/zero-trust-gateway/internal/limiter"
+	"github.com/redis/go-redis/v9"
 )
 
 
-func NewRouter(jwtValidator *auth.JWTValidator) http.Handler{
+func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler{
+	
+
 	upstreamA , err := url.Parse("http://localhost:8081")
 	if err != nil {
 		panic(err)
@@ -67,7 +72,13 @@ func NewRouter(jwtValidator *auth.JWTValidator) http.Handler{
 		}
 	})
 
-	authenticatedProxy := jwtValidator.Middleware(protectedHandler)
+	//Token bucket rate limiter
+	rateLimiter := limiter.NewRedisTokenBucket(rdb, 5, 1.0)
+
+	//Sliding window rate limiter
+	// rateLimiter := limiter.NewRedisSlidingWindow(rdb, 5, 10*time.Second)
+
+	authenticatedAndLimitedProxy := jwtValidator.Middleware(rateLimiter.Middleware(protectedHandler))
 
 	return http.HandlerFunc(func(w http.ResponseWriter , r*http.Request){
 		
@@ -77,7 +88,7 @@ func NewRouter(jwtValidator *auth.JWTValidator) http.Handler{
 			return
 		}
 
-		authenticatedProxy.ServeHTTP(w, r)
+		authenticatedAndLimitedProxy.ServeHTTP(w, r)
 	})
 }
 

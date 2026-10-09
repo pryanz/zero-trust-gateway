@@ -54,7 +54,7 @@ func main(){
 
 	validator := auth.NewJWTValidator(jwtSecret, rdb)
 
-	proxyHandler := proxy.NewRouter(validator)
+	proxyHandler := proxy.NewRouter(validator, rdb)
 	srv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      proxyHandler,
