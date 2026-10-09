@@ -9,15 +9,56 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
 	"github.com/pryanz/zero-trust-gateway/internal/proxy"
+	"github.com/pryanz/zero-trust-gateway/internal/auth"
+	"github.com/redis/go-redis/v9"
+	"github.com/joho/godotenv"
 )
 
 func main(){
-	proxyHandler := proxy.NewRouter()
+
+	if err := godotenv.Load(); err != nil{
+		log.Println("no .env found, Relying on system environment variables")
+	}
+	
+
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == ""{
+		redisAddr = "localhost:6379"
+	}
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr: redisAddr,
+		Password: "",
+		DB: 0,
+	})
+
+	ctxPing , cancelPing := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelPing()
+	if err := rdb.Ping(ctxPing).Err(); err != nil{
+		log.Printf("Warning: Redis connection failed (%v. Operating without revocation cache.", err)
+	} else {
+		log.Println("Connected to Redis successfully.")
+	}
+
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == ""{
+		log.Fatal("FATAL: JWT_SECRET environment variable is required")
+	}
+
+	port := os.Getenv("PORT")
+	if port == ""{
+		port = "8080"
+	}
+
+	validator := auth.NewJWTValidator(jwtSecret, rdb)
+
+	proxyHandler := proxy.NewRouter(validator)
 	srv := &http.Server{
-		Addr:         ":8080",
+		Addr:         ":" + port,
 		Handler:      proxyHandler,
-		ReadTimeout:  5 * time.Second,
+		ReadTimeout:  5 * time.Second, 
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
@@ -26,7 +67,7 @@ func main(){
 	defer stop()
 
 	go func(){
-		log.Println("Starting server on public API on :8080")
+		log.Println("Starting Zero trust gateway on :%s", port)
 		if err:= srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed){
 			log.Fatalf("Gateway failed: %v",err)
 		}

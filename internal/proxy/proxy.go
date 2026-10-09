@@ -8,10 +8,11 @@ import (
 	"strings"
 	"time"
 	"crypto/rand"
+	"github.com/pryanz/zero-trust-gateway/internal/auth"
 )
 
 
-func NewRouter() http.Handler{
+func NewRouter(jwtValidator *auth.JWTValidator) http.Handler{
 	upstreamA , err := url.Parse("http://localhost:8081")
 	if err != nil {
 		panic(err)
@@ -55,18 +56,28 @@ func NewRouter() http.Handler{
 	proxyA := createProxy(upstreamA)
 	proxyB := createProxy(upstreamB)
 
-	return http.HandlerFunc(func(w http.ResponseWriter , r*http.Request){
+	protectedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/api/v1/service-a"):
 			proxyA.ServeHTTP(w , r)
 		case strings.HasPrefix(r.URL.Path, "/api/v1/service-b"):
 			proxyB.ServeHTTP(w , r)
-		case r.URL.Path == "/healthz":
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"healthy"}`))
 		default:
 			http.Error(w, "Route not found", http.StatusNotFound)
 		}
+	})
+
+	authenticatedProxy := jwtValidator.Middleware(protectedHandler)
+
+	return http.HandlerFunc(func(w http.ResponseWriter , r*http.Request){
+		
+		if r.URL.Path == "/healthz"{
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"healthy"}`))
+			return
+		}
+
+		authenticatedProxy.ServeHTTP(w, r)
 	})
 }
 

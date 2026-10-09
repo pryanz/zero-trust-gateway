@@ -1,0 +1,13 @@
+BENCH_TOKEN=$(go run cmd/token_gen/main.go issue bench_user user bench-jti-999)
+
+wrk -t4 -c100 -d10s -H "Authorization: Bearer $BENCH_TOKEN" http://localhost:8080/api/v1/service-a/test
+
+Running 10s test @ http://localhost:8080/api/v1/service-a/test
+  4 threads and 100 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    14.24ms    8.97ms 106.92ms   69.84%
+    Req/Sec     1.83k   211.46     2.24k    83.50%
+  73113 requests in 10.02s, 11.92MB read
+
+Requests/sec:   7300.16
+Transfer/sec:      1.19MB
