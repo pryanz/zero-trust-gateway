@@ -20,6 +20,21 @@ var (
 		ErrAlgorithmMismatch = errors.New("unexpected signing algorithm")
 )
 
+type JWTClaims struct{
+	Subject string `json:"sub"`
+	Roles []string `json:"roles"`
+	JTI string `json:"jti"`
+}
+
+type contextKey string
+
+const claimsContextKey contextKey = "jwt_claims"
+
+func GetClaimsFromContext(ctx context.Context) (*JWTClaims, bool) {
+	claims, ok := ctx.Value(claimsContextKey).(*JWTClaims)
+	return claims, ok
+}
+
 type JWTValidator struct {
 	secretKey []byte
 	redisClient *redis.Client
@@ -61,37 +76,48 @@ func(v *JWTValidator) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		claims, ok := token.Claims.(jwt.MapClaims)
+		mapClaims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
 			http.Error(w, ErrInvalidToken.Error(), http.StatusUnauthorized)
 			return
 		}
 
-		if v.redisClient != nil {
-			if jti, ok := claims["jti"].(string); ok && jti != ""{
-				ctx, cancel := context.WithTimeout(r.Context(), 50*time.Millisecond)
-				defer cancel()
+		jtiStr, _ := mapClaims["jti"].(string)
+		if v.redisClient != nil && jtiStr == "" {
+			ctx, cancel := context.WithTimeout(r.Context(), 50*time.Millisecond)
+			defer cancel()
 
-				revoked , err:= v.redisClient.Get(ctx, "revoked:"+jti).Result()
+			revoked , err:= v.redisClient.Get(ctx, "revoked:"+jtiStr).Result()
 
-				if err != nil && !errors.Is(err, redis.Nil) {
-					http.Error(w, "authentication verification unavailable", http.StatusServiceUnavailable)
-					return
-				}
-				if err == nil && revoked == "true" {
-					http.Error(w, ErrRevokedToken.Error(), http.StatusUnauthorized)
-					return
+			if err != nil && !errors.Is(err, redis.Nil) {
+				http.Error(w, "authentication verification unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if err == nil && revoked == "true" {
+				http.Error(w, ErrRevokedToken.Error(), http.StatusUnauthorized)
+				return
+			}
+			
+		}
+		claims := &JWTClaims{
+			JTI: jtiStr,
+		}
+
+		if sub, ok := mapClaims["sub"].(string); ok{
+			claims.Subject = sub
+		}
+
+		if role, ok := mapClaims["role"].(string); ok{
+			claims.Roles = []string{role}
+		} else if rolesRaw , ok := mapClaims["roles"].([]interface{}); ok {
+			for _, r := range rolesRaw {
+				if rStr , ok := r.(string); ok {
+					claims.Roles = append(claims.Roles , rStr)
 				}
 			}
 		}
 
-		if sub, ok := claims["sub"].(string); ok{
-			r.Header.Set("X-User-ID", sub)
-		}
-		if role, ok := claims["role"].(string); ok{
-			r.Header.Set("X-User-Role", role)
-		}
-
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), claimsContextKey, claims)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

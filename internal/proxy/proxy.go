@@ -40,8 +40,16 @@ func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler{
 			Rewrite: func(r *httputil.ProxyRequest){
 
 				r.SetURL(target)
-
 				r.SetXForwarded()
+
+				r.Out.Header.Del("X-User-ID")
+				r.Out.Header.Del("X-User-Roles")
+				r.Out.Header.Del("Authorization")
+
+				if claims, ok:= auth.GetClaimsFromContext(r.In.Context()); ok {
+					r.Out.Header.Set("X-User-ID", claims.Subject)
+					r.Out.Header.Set("X-User-Roles", strings.Join(claims.Roles, ","))
+				}
 
 				r.Out.Header.Del("Connection")
 				r.Out.Header.Del("Keep-Alive")

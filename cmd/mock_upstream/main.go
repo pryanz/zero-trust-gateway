@@ -15,11 +15,17 @@ func main(){
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r*http.Request){
-		log.Printf("[Upstream :%s] %s %s | X-Request-ID: %s | X-Forwarded-For: %s",
-					port, r.Method, r.URL.Path, r.Header.Get("X-Request-ID"), r.Header.Get("X-Forwarded-For"))
+
+		userID := r.Header.Get("X-User-ID")
+		userRoles := r.Header.Get("X-User-Roles")
+		reqID := r.Header.Get("X-Request-ID")
+
+		log.Printf("[Upstream :%s] %s %s | UserID: %s | Roles: %s | ReqID : %s",
+					port, r.Method, r.URL.Path,userID, userRoles, reqID)
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ok", "port":"%s", "path":"%s"}`, port, r.URL.Path)
+		fmt.Fprintf(w, `{"status":"ok", "port":"%s", "path":"%s", "user_id":"%s", "roles":"%s", "request_id":"%s"}`, port, r.URL.Path, userID, userRoles, reqID)
 	})
 
 	log.Printf("Mock upstream running on :%s", port)
