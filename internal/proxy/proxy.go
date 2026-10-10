@@ -9,16 +9,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/pryanz/zero-trust-gateway/internal/auth"
 	"github.com/pryanz/zero-trust-gateway/internal/limiter"
+	"github.com/pryanz/zero-trust-gateway/internal/metrics"
+	"github.com/pryanz/zero-trust-gateway/internal/middleware"
 	"github.com/redis/go-redis/v9"
 )
 
+func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler {
 
-func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler{
-	
-
-	upstreamA , err := url.Parse("http://localhost:8081")
+	upstreamA, err := url.Parse("http://localhost:8081")
 	if err != nil {
 		panic(err)
 	}
@@ -28,16 +29,16 @@ func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler{
 	}
 
 	transport := &http.Transport{
-		MaxIdleConns: 100,
-		MaxIdleConnsPerHost: 100,
-		IdleConnTimeout: 90 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   100,
+		IdleConnTimeout:       90 * time.Second,
 		ResponseHeaderTimeout: 5 * time.Second,
 	}
 
 	createProxy := func(target *url.URL) *httputil.ReverseProxy {
 		return &httputil.ReverseProxy{
 			Transport: transport,
-			Rewrite: func(r *httputil.ProxyRequest){
+			Rewrite: func(r *httputil.ProxyRequest) {
 
 				r.SetURL(target)
 				r.SetXForwarded()
@@ -46,7 +47,7 @@ func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler{
 				r.Out.Header.Del("X-User-Roles")
 				r.Out.Header.Del("Authorization")
 
-				if claims, ok:= auth.GetClaimsFromContext(r.In.Context()); ok {
+				if claims, ok := auth.GetClaimsFromContext(r.In.Context()); ok {
 					r.Out.Header.Set("X-User-ID", claims.Subject)
 					r.Out.Header.Set("X-User-Roles", strings.Join(claims.Roles, ","))
 				}
@@ -58,10 +59,10 @@ func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler{
 				r.Out.Header.Del("Upgrade")
 
 				reqID := r.In.Header.Get("X-Request-ID")
-				if reqID == ""{
+				if reqID == "" {
 					reqID = generateRequestID()
 				}
-				r.Out.Header.Set("X-Request-ID",reqID)
+				r.Out.Header.Set("X-Request-ID", reqID)
 			},
 		}
 	}
@@ -69,12 +70,12 @@ func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler{
 	proxyA := createProxy(upstreamA)
 	proxyB := createProxy(upstreamB)
 
-	protectedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+	protectedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/api/v1/service-a"):
-			proxyA.ServeHTTP(w , r)
+			proxyA.ServeHTTP(w, r)
 		case strings.HasPrefix(r.URL.Path, "/api/v1/service-b"):
-			proxyB.ServeHTTP(w , r)
+			proxyB.ServeHTTP(w, r)
 		default:
 			http.Error(w, "Route not found", http.StatusNotFound)
 		}
@@ -86,17 +87,28 @@ func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler{
 	//Sliding window rate limiter
 	// rateLimiter := limiter.NewRedisSlidingWindow(rdb, 5, 10*time.Second)
 
-	authenticatedAndLimitedProxy := jwtValidator.Middleware(rateLimiter.Middleware(protectedHandler))
+	pipeline := middleware.StructuredLogger(nil)(
+		metrics.Middleware(
+			jwtValidator.Middleware(
+				rateLimiter.Middleware(protectedHandler),
+			),
+		),
+	)
 
-	return http.HandlerFunc(func(w http.ResponseWriter , r*http.Request){
-		
-		if r.URL.Path == "/healthz"{
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		if r.URL.Path == "/healthz" {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"status":"healthy"}`))
 			return
 		}
 
-		authenticatedAndLimitedProxy.ServeHTTP(w, r)
+		if r.URL.Path == "/metrics" {
+			promhttp.Handler().ServeHTTP(w, r)
+			return
+		}
+
+		pipeline.ServeHTTP(w, r)
 	})
 }
 

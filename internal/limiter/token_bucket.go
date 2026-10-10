@@ -1,11 +1,13 @@
 package limiter
 
 import (
-	"net/http"
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"time"
 
+	"github.com/pryanz/zero-trust-gateway/internal/auth"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -48,7 +50,7 @@ type RedisTokenBucket struct {
 	refillRate float64
 }
 
-func NewRedisTokenBucket(rdb *redis.Client, capacity int, refillRate float64) *RedisTokenBucket{
+func NewRedisTokenBucket(rdb *redis.Client, capacity int, refillRate float64) *RedisTokenBucket {
 	return &RedisTokenBucket{
 		rdb:        rdb,
 		capacity:   capacity,
@@ -57,10 +59,17 @@ func NewRedisTokenBucket(rdb *redis.Client, capacity int, refillRate float64) *R
 }
 
 func (tb *RedisTokenBucket) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
-		clientKey := r.Header.Get("X-User-ID")
-		if clientKey == ""{
-			clientKey = r.RemoteAddr
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		clientKey := ""
+		if claims, ok := auth.GetClaimsFromContext(r.Context()); ok && claims.Subject != "" {
+			clientKey = "user:" + claims.Subject
+		} else {
+			host, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				host = r.RemoteAddr
+			}
+			clientKey = "ip:" + host
 		}
 
 		redisKey := fmt.Sprintf("rate_limit:tb:%s", clientKey)
