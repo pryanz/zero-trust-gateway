@@ -13,17 +13,17 @@ import (
 )
 
 var (
-		ErrMissingToken 	 = errors.New("missing authorization header")
-		ErrInvalidToken 	 = errors.New("invalid or forged token")
-		ErrExpiredToken 	 = errors.New("token has expired")
-		ErrRevokedToken 	 = errors.New("token has been revoked")
-		ErrAlgorithmMismatch = errors.New("unexpected signing algorithm")
+	ErrMissingToken      = errors.New("missing authorization header")
+	ErrInvalidToken      = errors.New("invalid or forged token")
+	ErrExpiredToken      = errors.New("token has expired")
+	ErrRevokedToken      = errors.New("token has been revoked")
+	ErrAlgorithmMismatch = errors.New("unexpected signing algorithm")
 )
 
-type JWTClaims struct{
-	Subject string `json:"sub"`
-	Roles []string `json:"roles"`
-	JTI string `json:"jti"`
+type JWTClaims struct {
+	Subject string   `json:"sub"`
+	Roles   []string `json:"roles"`
+	JTI     string   `json:"jti"`
 }
 
 type contextKey string
@@ -36,21 +36,28 @@ func GetClaimsFromContext(ctx context.Context) (*JWTClaims, bool) {
 }
 
 type JWTValidator struct {
-	secretKey []byte
+	secretKey   []byte
 	redisClient *redis.Client
 }
 
-func NewJWTValidator(secret string, redisClient *redis.Client) *JWTValidator{
+func NewJWTValidator(secret string, redisClient *redis.Client) *JWTValidator {
 	return &JWTValidator{
-		secretKey: []byte(secret),
+		secretKey:   []byte(secret),
 		redisClient: redisClient,
 	}
 }
 
-func(v *JWTValidator) Middleware(next http.Handler) http.Handler {
+func (v *JWTValidator) RevokeToken(ctx context.Context, jti string, expiration time.Duration) error {
+	if v.redisClient == nil {
+		return errors.New("redis client not configured")
+	}
+	return v.redisClient.Set(ctx, "revoked:"+jti, "true", expiration).Err()
+}
+
+func (v *JWTValidator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
-		if authHeader == ""{
+		if authHeader == "" {
 			http.Error(w, ErrMissingToken.Error(), http.StatusUnauthorized)
 			return
 		}
@@ -65,7 +72,7 @@ func(v *JWTValidator) Middleware(next http.Handler) http.Handler {
 
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok{
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("%w: %v", ErrAlgorithmMismatch, token.Header["alg"])
 			}
 			return v.secretKey, nil
@@ -83,11 +90,17 @@ func(v *JWTValidator) Middleware(next http.Handler) http.Handler {
 		}
 
 		jtiStr, _ := mapClaims["jti"].(string)
-		if v.redisClient != nil && jtiStr == "" {
+
+		if jtiStr == "" {
+			http.Error(w, "invalid token: missing jti claim", http.StatusUnauthorized)
+			return
+		}
+
+		if v.redisClient != nil && jtiStr != "" {
 			ctx, cancel := context.WithTimeout(r.Context(), 50*time.Millisecond)
 			defer cancel()
 
-			revoked , err:= v.redisClient.Get(ctx, "revoked:"+jtiStr).Result()
+			revoked, err := v.redisClient.Get(ctx, "revoked:"+jtiStr).Result()
 
 			if err != nil && !errors.Is(err, redis.Nil) {
 				http.Error(w, "authentication verification unavailable", http.StatusServiceUnavailable)
@@ -97,22 +110,22 @@ func(v *JWTValidator) Middleware(next http.Handler) http.Handler {
 				http.Error(w, ErrRevokedToken.Error(), http.StatusUnauthorized)
 				return
 			}
-			
+
 		}
 		claims := &JWTClaims{
 			JTI: jtiStr,
 		}
 
-		if sub, ok := mapClaims["sub"].(string); ok{
+		if sub, ok := mapClaims["sub"].(string); ok {
 			claims.Subject = sub
 		}
 
-		if role, ok := mapClaims["role"].(string); ok{
+		if role, ok := mapClaims["role"].(string); ok {
 			claims.Roles = []string{role}
-		} else if rolesRaw , ok := mapClaims["roles"].([]interface{}); ok {
+		} else if rolesRaw, ok := mapClaims["roles"].([]interface{}); ok {
 			for _, r := range rolesRaw {
-				if rStr , ok := r.(string); ok {
-					claims.Roles = append(claims.Roles , rStr)
+				if rStr, ok := r.(string); ok {
+					claims.Roles = append(claims.Roles, rStr)
 				}
 			}
 		}

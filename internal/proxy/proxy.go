@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/pryanz/zero-trust-gateway/internal/auth"
 	"github.com/pryanz/zero-trust-gateway/internal/limiter"
@@ -100,6 +102,58 @@ func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler 
 		}
 	})
 
+	logoutHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "missing authorization header", http.StatusBadRequest)
+			return
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+			http.Error(w, "invalid authorization header format", http.StatusBadRequest)
+			return
+		}
+
+		tokenString := parts[1]
+
+		mapClaims := jwt.MapClaims{}
+		_, _, err := new(jwt.Parser).ParseUnverified(tokenString, &mapClaims)
+		if err != nil {
+			http.Error(w, "invalid token structure", http.StatusBadRequest)
+			return
+		}
+
+		jtiStr, _ := mapClaims["jti"].(string)
+		if jtiStr == "" {
+			http.Error(w, "token missing jti claim", http.StatusBadRequest)
+			return
+		}
+
+		var ttl time.Duration = 15 * time.Minute
+		if exp, ok := mapClaims["exp"].(float64); ok {
+			expTime := time.Unix(int64(exp), 0)
+			ttl = time.Until(expTime)
+			if ttl <= 0 {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"status":"already_expired"}`))
+				return
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 100*time.Millisecond)
+		defer cancel()
+
+		err = jwtValidator.RevokeToken(ctx, jtiStr, ttl)
+		if err != nil {
+			http.Error(w, "failed to revoke token", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success","message":"token revoked successfully"}`))
+	})
+
 	//Token bucket rate limiter
 	rateLimiter := limiter.NewRedisTokenBucket(rdb, 5, 1.0)
 
@@ -124,6 +178,11 @@ func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler 
 
 		if r.URL.Path == "/metrics" {
 			promhttp.Handler().ServeHTTP(w, r)
+			return
+		}
+
+		if r.URL.Path == "/api/v1/auth/logout" && r.Method == http.MethodPost {
+			logoutHandler.ServeHTTP(w, r)
 			return
 		}
 
