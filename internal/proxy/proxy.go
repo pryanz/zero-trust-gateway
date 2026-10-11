@@ -2,10 +2,13 @@ package proxy
 
 import (
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -19,16 +22,32 @@ import (
 
 func NewRouter(jwtValidator *auth.JWTValidator, rdb *redis.Client) http.Handler {
 
-	upstreamA, err := url.Parse("http://localhost:8081")
+	upstreamA, err := url.Parse("https://localhost:8081")
 	if err != nil {
 		panic(err)
 	}
-	upstreamB, err := url.Parse("http://localhost:8082")
+	upstreamB, err := url.Parse("https://localhost:8082")
 	if err != nil {
 		panic(err)
 	}
 
+	clientCert, err := tls.LoadX509KeyPair("certs/client.crt", "certs/client.key")
+	if err != nil {
+		panic(err)
+	}
+
+	caCert, err := os.ReadFile("certs/ca.crt")
+	if err != nil {
+		panic(err)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
 	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			Certificates: []tls.Certificate{clientCert},
+			RootCAs:      caCertPool,
+		},
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   100,
 		IdleConnTimeout:       90 * time.Second,
