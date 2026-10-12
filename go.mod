@@ -3,7 +3,7 @@ module github.com/pryanz/zero-trust-gateway
 go 1.27.1
 
 require (
-	github.com/alicebob/miniredis/v2 v2.39.0
+	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.25.0
