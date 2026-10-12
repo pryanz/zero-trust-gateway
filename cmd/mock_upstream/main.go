@@ -3,8 +3,6 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
-
-	// "encoding/json"
 	"fmt"
 	"log"
 	"net/http"

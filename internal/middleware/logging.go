@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net"
@@ -10,6 +12,12 @@ import (
 
 	"github.com/pryanz/zero-trust-gateway/internal/auth"
 )
+
+func generateRequestID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
 
 type responseRecorder struct {
 	http.ResponseWriter
@@ -59,6 +67,13 @@ func StructuredLogger(jsonLogger *log.Logger) func(http.Handler) http.Handler {
 				statusCode:     http.StatusOK,
 			}
 
+			reqID := r.Header.Get("X-Request-ID")
+			if reqID == "" {
+				reqID = generateRequestID()
+				r.Header.Set("X-Request-ID", reqID)
+			}
+			w.Header().Set("X-Request-ID", reqID)
+
 			next.ServeHTTP(rec, r)
 
 			duration := time.Since(start)
@@ -84,7 +99,7 @@ func StructuredLogger(jsonLogger *log.Logger) func(http.Handler) http.Handler {
 
 			entry := LogEntry{
 				Timestamp:  start.UTC().Format(time.RFC3339Nano),
-				RequestID:  r.Header.Get("X-Request-ID"),
+				RequestID:  reqID,
 				ClientIP:   clientIP,
 				Method:     r.Method,
 				Path:       r.URL.Path,

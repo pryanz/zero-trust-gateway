@@ -36,7 +36,7 @@ func main() {
 	ctxPing, cancelPing := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancelPing()
 	if err := rdb.Ping(ctxPing).Err(); err != nil {
-		log.Printf("Warning: Redis connection failed (%v. Operating without revocation cache.", err)
+		log.Printf("Warning: Redis connection failed (%v). Operating without revocation cache.", err)
 	} else {
 		log.Println("Connected to Redis successfully.")
 	}

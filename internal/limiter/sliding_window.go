@@ -3,9 +3,11 @@ package limiter
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
+	"github.com/pryanz/zero-trust-gateway/internal/auth"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -31,25 +33,31 @@ var slidingWindowLua = redis.NewScript(`
 	end
 `)
 
-type RedisSlidingWindow struct{
-	rdb *redis.Client
-	limit int
+type RedisSlidingWindow struct {
+	rdb    *redis.Client
+	limit  int
 	window time.Duration
 }
 
-func NewRedisSlidingWindow(rdb *redis.Client, limit int, window time.Duration) *RedisSlidingWindow{
+func NewRedisSlidingWindow(rdb *redis.Client, limit int, window time.Duration) *RedisSlidingWindow {
 	return &RedisSlidingWindow{
-		rdb: rdb,
-		limit: limit,
+		rdb:    rdb,
+		limit:  limit,
 		window: window,
 	}
 }
 
 func (sw *RedisSlidingWindow) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		clientKey := r.Header.Get("X-User-ID")
-		if clientKey == "" {
-			clientKey = r.RemoteAddr
+		clientKey := ""
+		if claims, ok := auth.GetClaimsFromContext(r.Context()); ok && claims.Subject != "" {
+			clientKey = "user:" + claims.Subject
+		} else {
+			host, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				host = r.RemoteAddr
+			}
+			clientKey = "ip:" + host
 		}
 
 		redisKey := fmt.Sprintf("rate_limit:sw:%s", clientKey)
