@@ -1,0 +1,12 @@
+// export BENCHMARK_JWT using cmd/token_gen/main.go
+wrk -t2 -c50 -d20s -s benchmark.lua http://localhost:8080/api/v1/service-a/test > benchmarks/auth_result.txt
+
+Running 20s test @ http://localhost:8080/api/v1/service-a/test
+  2 threads and 50 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     4.04ms    2.73ms  53.40ms   76.82%
+    Req/Sec     6.51k     1.63k    9.79k    64.00%
+  259278 requests in 20.03s, 53.91MB read
+  Non-2xx or 3xx responses: 259245
+Requests/sec:  12946.05
+Transfer/sec:      2.69MB
